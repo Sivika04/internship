@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Live Chat · Socket.IO</title>
+<link rel="preconnect" href="https://cdn.socket.io" crossorigin>
+<style>
+  :root { --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee; }
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text);height:100vh;display:grid;grid-template-rows:auto 1fr auto}
+  header,footer{padding:12px 16px;background:#0b1220;border-bottom:1px solid #1f2937}
+  footer{border-top:1px solid #1f2937;border-bottom:none}
+  .wrap{max-width:1000px;margin:0 auto}
+  .bar{display:grid;gap:8px;grid-template-columns:1fr 140px 120px}
+  input,select,button{padding:10px;border-radius:10px;border:1px solid #1f2937;background:#0b1220;color:var(--text)}
+  button{cursor:pointer}
+  main .wrap{display:grid;gap:16px;grid-template-columns:1fr 260px;padding:16px}
+  .panel{background:var(--panel);border:1px solid #1f2937;border-radius:14px;padding:12px;min-height:60vh}
+  #messages{display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow:auto;padding-right:6px}
+  .msg{padding:8px 10px;background:#0b1220;border:1px solid #1f2937;border-radius:10px}
+  .me{border-color:#0ea5e9}
+  .sys{background:transparent;color:var(--muted);border:none;text-align:center}
+  .meta{font-size:.8rem;color:var(--muted)}
+  .users ul{list-style:none;margin:8px 0 0;padding:0;max-height:48vh;overflow:auto}
+  .typing{color:var(--muted);min-height:1.2rem;margin-top:6px}
+  .composer{display:grid;grid-template-columns:1fr auto;gap:8px}
+</style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="bar">
+        <input id="username" placeholder="Your name (e.g., Anika)" maxlength="20"/>
+        <select id="room">
+          <option value="general">#general</option>
+          <option value="farming">#farming</option>
+          <option value="tech">#tech</option>
+        </select>
+        <button id="joinBtn">Join</button>
+      </div>
+      <div id="status" class="wrap" style="padding:4px 0;color:var(--muted)"></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap">
+      <section class="panel">
+        <div id="messages" aria-live="polite"></div>
+        <div id="typing" class="typing"></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <input id="text" placeholder="Type a message…" maxlength="2000"/>
+          <button>Send</button>
+        </form>
+      </section>
+
+      <aside class="panel users">
+        <h3 style="margin:0 0 8px">Online</h3>
+        <ul id="userlist"></ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap" style="color:var(--muted)">Powered by Socket.IO · Demo app</div>
+  </footer>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    const el = (id)=>document.getElementById(id);
+    const status = el("status"), msgBox = el("messages"), typing = el("typing");
+    const userlist = el("userlist"), form = el("composer"), input = el("text");
+    const joinBtn = el("joinBtn"), username = el("username"), room = el("room");
+
+    const socket = io({ autoConnect:false });
+
+    function addMessage({username, text, ts}, cls=""){
+      const div = document.createElement("div");
+      div.className = `msg ${cls}`;
+      const when = new Date(ts).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+      div.innerHTML = `<div><strong>${username}</strong> <span class="meta">· ${when}</span></div><div>${escapeHtml(text)}</div>`;
+      msgBox.appendChild(div);
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+    function addSystem(text){
+      const div = document.createElement("div");
+      div.className = "msg sys";
+      div.textContent = text;
+      msgBox.appendChild(div);
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+    function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+
+    // Socket events
+    socket.on("connect", ()=> status.textContent = "Connected");
+    socket.on("disconnect", ()=> status.textContent = "Disconnected");
+    socket.on("system", addSystem);
+    socket.on("users", (list)=>{
+      userlist.innerHTML = "";
+      list.forEach(u=>{
+        const li = document.createElement("li"); li.textContent = u; userlist.appendChild(li);
+      });
+    });
+    socket.on("message", (m)=>{
+      const me = (username.value.trim() || "Guest");
+      addMessage(m, m.username === me ? "me" : "");
+    });
+    socket.on("typing", ({username:u, isTyping})=>{
+      typing.textContent = isTyping ? `${u} is typing…` : "";
+    });
+    socket.on("joinedPrompt", ()=>{
+      // Re-emit join with current inputs after room switch (if you add UI to switch)
+      join();
+    });
+
+    // Join flow
+    function join(){
+      const u = username.value.trim() || "Guest";
+      const r = room.value;
+      if (!socket.connected) socket.connect();
+      socket.emit("join", { username: u, room: r });
+      addSystem(`You joined #${r} as ${u}`);
+    }
+
+    joinBtn.addEventListener("click", join);
+
+    // Composer
+    let typingTimer;
+    form.addEventListener("submit", (e)=>{
+      e.preventDefault();
+      const text = input.value.trim();
+      if(!text) return;
+      socket.emit("message", text);
+      input.value = "";
+      socket.emit("typing", false);
+    });
+    input.addEventListener("input", ()=>{
+      clearTimeout(typingTimer);
+      socket.emit("typing", true);
+      typingTimer = setTimeout(()=> socket.emit("typing", false), 1200);
+    });
+  </script>
+</body>
+</html>

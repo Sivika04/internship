@@ -1,0 +1,13 @@
+import React from "react";
+
+export default function ChatWindow({ messages, currentUser }) {
+  return (
+    <div className="chat-window">
+      {messages.map((msg, i) => (
+        <div key={i} className={`message ${msg.user === currentUser ? "me" : ""}`}>
+          <strong>{msg.user}:</strong> {msg.text}
+        </div>
+      ))}
+    </div>
+  );
+}

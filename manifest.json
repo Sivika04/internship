@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Time Tracker",
+  "version": "1.0",
+  "permissions": ["tabs","alarms","storage","idle","activeTab","scripting","notifications"],
+  "background": {"service_worker":"service_worker.js"},
+  "action": {"default_popup":"popup/index.html"},
+  "options_page": "options/options.html",
+  "host_permissions": ["<all_urls>"]
+}

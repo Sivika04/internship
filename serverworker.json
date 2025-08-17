@@ -1,0 +1,53 @@
+// service_worker.js
+let active = { tabId: null, domain: null, start: null };
+const LOCAL_BATCH_KEY = 'local_batch';
+
+function nowMs(){ return Date.now(); }
+
+async function sendBatch(batch){
+  // if local-only mode: save to chrome.storage.local
+  // else send to server via fetch with JWT
+}
+
+chrome.tabs.onActivated.addListener(async info => {
+  const tab = await chrome.tabs.get(info.tabId);
+  rotateActive(tab);
+});
+
+chrome.windows.onFocusChanged.addListener(async winId => {
+  if(winId === chrome.windows.WINDOW_ID_NONE){
+    stopActive();
+    return;
+  }
+  const [tab] = await chrome.tabs.query({active:true, windowId: winId});
+  if(tab) rotateActive(tab);
+});
+
+chrome.idle.onStateChanged.addListener(state => {
+  if(state !== 'active') stopActive();
+});
+
+async function rotateActive(tab){
+  const domain = (new URL(tab.url)).hostname;
+  if(active.tabId === tab.id) return;
+  if(active.tabId) persistActive();
+  active = { tabId: tab.id, domain, start: nowMs(), title: tab.title };
+}
+
+function stopActive(){
+  if(!active.tabId) return;
+  persistActive();
+  active = {tabId:null, domain:null, start:null};
+}
+
+function persistActive(){
+  const end = nowMs();
+  const entry = {domain: active.domain, start: active.start, end, duration: end - active.start, title: active.title};
+  // push to local buffer, flush periodically or when > N entries
+}
+
+// flush alarm every minute
+chrome.alarms.create('flush', {periodInMinutes: 1});
+chrome.alarms.onAlarm.addListener(alarm => { if(alarm.name==='flush') flushBuffer(); });
+
+async function flushBuffer(){ /* read buffer + call sendBatch */ }

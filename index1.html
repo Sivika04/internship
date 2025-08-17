@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weather Now · Open-Meteo Demo</title>
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee;
+      --ring:#22d3ee44;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;
+         background:linear-gradient(180deg,#0b1220,#0f172a 35%,#0f172a);
+         color:var(--text);min-height:100svh;display:flex;flex-direction:column}
+    header{position:sticky;top:0;background:#0b1220cc;backdrop-filter:blur(8px);
+           border-bottom:1px solid #1f2937}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    h1{margin:0;font-size:clamp(1.2rem,2.5vw,1.6rem);letter-spacing:.3px}
+    .searchbar{display:grid;grid-template-columns:1fr auto auto;gap:10px;margin-top:12px}
+    input[type="search"]{
+      width:100%;padding:12px 14px;border-radius:12px;border:1px solid #1f2937;background:#0b1220;color:var(--text);
+      outline:none;box-shadow:0 0 0 0 transparent;transition:border .2s, box-shadow .2s;
+    }
+    input[type="search"]:focus{border-color:var(--accent);box-shadow:0 0 0 4px var(--ring)}
+    button{
+      padding:12px 14px;border-radius:12px;border:1px solid #1f2937;background:#0b1220;color:var(--text);
+      cursor:pointer;transition:transform .06s ease, border .2s;
+    }
+    button:hover{border-color:#334155}
+    button:active{transform:translateY(1px)}
+    main{flex:1}
+    .grid{display:grid;gap:16px;margin-top:18px}
+    @media (min-width:800px){ .grid{grid-template-columns:1.2fr .8fr} }
+
+    .card{
+      background:linear-gradient(180deg,#0f172a,#0b1220);
+      border:1px solid #1f2937;border-radius:18px;padding:18px;box-shadow:0 10px 30px #0006;
+    }
+
+    .current{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+    .bigtemp{font-size:clamp(2.2rem,5vw,3.5rem);font-weight:700}
+    .muted{color:var(--muted);font-size:.95rem}
+    .cityline{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+    .pill{padding:4px 10px;border:1px solid #1f2937;border-radius:999px;color:var(--muted);font-size:.85rem}
+
+    .days{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    @media (min-width:520px){.days{grid-template-columns:repeat(4,1fr)}}
+    @media (min-width:960px){.days{grid-template-columns:repeat(7,1fr)}}
+    .day{
+      background:#0b1220;border:1px solid #1f2937;border-radius:14px;padding:12px;text-align:center
+    }
+    .day h4{margin:6px 0 8px;font-weight:600}
+    .range{font-variant-numeric:tabular-nums}
+    .wicon{font-size:1.6rem}
+
+    .loading, .error{padding:12px;border-radius:12px}
+    .loading{background:#0b122055;border:1px dashed #1f2937}
+    .error{background:#7f1d1d;border:1px solid #b91c1c}
+
+    footer{border-top:1px solid #1f2937}
+    a{color:var(--accent);text-decoration:none}
+    .sr{position:absolute;left:-9999px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Weather Now <span class="pill">Open-Meteo API</span></h1>
+      <div class="searchbar" aria-label="Search city">
+        <input id="q" type="search" placeholder="Search city (e.g., Chennai, Pune, Delhi) …" autocomplete="off" />
+        <button id="searchBtn" aria-label="Search">Search</button>
+        <button id="geoBtn" aria-label="Use my location">Use my location</button>
+      </div>
+      <div id="status" class="muted" role="status" aria-live="polite"></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="grid">
+      <article id="currentCard" class="card" aria-live="polite">
+        <div class="loading">Loading current weather…</div>
+      </article>
+
+      <aside id="forecastCard" class="card" aria-live="polite">
+        <div class="loading">Loading 7-day forecast…</div>
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap muted">
+      Data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
+      Geocoding: <a href="https://open-meteo.com/en/docs/geocoding-api" target="_blank" rel="noopener">Open-Meteo Geocoding</a>
+    </div>
+  </footer>
+
+  <script>
+    // --- Small helper: map Open-Meteo weather codes to emoji + label
+    const WMO = {
+      0:["☀️","Clear"], 1:["🌤️","Mainly clear"], 2:["⛅","Partly cloudy"], 3:["☁️","Overcast"],
+      45:["🌫️","Fog"], 48:["🌫️","Depositing rime fog"],
+      51:["🌦️","Drizzle light"], 53:["🌦️","Drizzle"], 55:["🌦️","Drizzle heavy"],
+      61:["🌧️","Rain light"], 63:["🌧️","Rain"], 65:["🌧️","Rain heavy"],
+      66:["🌧️","Freezing rain light"], 67:["🌧️","Freezing rain heavy"],
+      71:["🌨️","Snow fall light"], 73:["🌨️","Snow fall"], 75:["🌨️","Snow fall heavy"],
+      77:["❄️","Snow grains"], 80:["🌧️","Rain showers light"], 81:["🌧️","Rain showers"], 82:["🌧️","Rain showers violent"],
+      85:["🌨️","Snow showers light"], 86:["🌨️","Snow showers heavy"],
+      95:["⛈️","Thunderstorm"], 96:["⛈️","Thunderstorm with hail"], 99:["⛈️","Thunderstorm with heavy hail"]
+    };
+
+    const els = {
+      q: document.getElementById('q'),
+      searchBtn: document.getElementById('searchBtn'),
+      geoBtn: document.getElementById('geoBtn'),
+      status: document.getElementById('status'),
+      currentCard: document.getElementById('currentCard'),
+      forecastCard: document.getElementById('forecastCard')
+    };
+
+    const fmtDate = iso => new Date(iso).toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'});
+    const title = (s)=> s[0].toUpperCase() + s.slice(1);
+
+    async function geocode(name){
+      const url = `https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=${encodeURIComponent(name)}`;
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('Geocoding failed');
+      const j = await r.json();
+      if(!j.results || !j.results.length) throw new Error('City not found');
+      const g = j.results[0];
+      return { lat:g.latitude, lon:g.longitude, name:`${g.name}${g.country ? ', '+g.country : ''}` };
+    }
+
+    async function weather(lat, lon){
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`
+        + `&current=temperature_2m,weather_code,wind_speed_10m`
+        + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum`
+        + `&timezone=auto`;
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('Weather fetch failed');
+      return r.json();
+    }
+
+    function renderCurrent(city, data){
+      const cc = data.current;
+      const [emoji, label] = WMO[cc.weather_code] || ["❓","Unknown"];
+      els.currentCard.innerHTML = `
+        <div class="current">
+          <div class="wicon" aria-hidden="true">${emoji}</div>
+          <div>
+            <div class="cityline">
+              <h2 style="margin:0">${title(city)}</h2>
+              <span class="pill">${label}</span>
+            </div>
+            <div class="bigtemp">${Math.round(cc.temperature_2m)}°C</div>
+            <div class="muted">Wind: ${Math.round(cc.wind_speed_10m)} km/h · Updated now</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderForecast(data){
+      const d = data.daily;
+      const days = d.time.map((t,i)=>{
+        const [emoji,label] = WMO[d.weather_code[i]] || ["❓",""];
+        const hi = Math.round(d.temperature_2m_max[i]);
+        const lo = Math.round(d.temperature_2m_min[i]);
+        const p  = d.precipitation_sum[i];
+        return `
+          <div class="day" title="${label}">
+            <h4>${fmtDate(t)}</h4>
+            <div class="wicon" aria-hidden="true">${emoji}</div>
+            <div class="range"><strong>${hi}°</strong> / ${lo}°C</div>
+            <div class="muted">${p ? `Rain: ${p.toFixed(1)} mm` : `Rain: —`}</div>
+          </div>
+        `;
+      }).join('');
+      els.forecastCard.innerHTML = `
+        <h3 style="margin:0 0 10px">7-Day Forecast</h3>
+        <div class="days">${days}</div>
+      `;
+    }
+
+    async function showByCity(name){
+      try{
+        els.status.textContent = `Searching “${name}”…`;
+        const g = await geocode(name);
+        els.status.textContent = `Loading weather for ${g.name}…`;
+        const w = await weather(g.lat, g.lon);
+        renderCurrent(g.name, w);
+        renderForecast(w);
+        els.status.textContent = `Showing weather for ${g.name}`;
+      }catch(err){
+        els.currentCard.innerHTML = `<div class="error">⚠️ ${err.message}</div>`;
+        els.forecastCard.innerHTML = `<div class="error">Try another city or use “Use my location”.</div>`;
+        els.status.textContent = '';
+      }
+    }
+
+    async function showByGeo(){
+      els.status.textContent = 'Requesting your location…';
+      if(!('geolocation' in navigator)){
+        els.status.textContent = '';
+        els.currentCard.innerHTML = `<div class="error">Geolocation not supported by your browser.</div>`;
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(async pos=>{
+        try{
+          const {latitude:lat, longitude:lon} = pos.coords;
+          els.status.textContent = 'Loading local weather…';
+          const w = await weather(lat, lon);
+          const city = `Your location`;
+          renderCurrent(city, w);
+          renderForecast(w);
+          els.status.textContent = 'Showing local weather';
+        }catch(e){
+          els.currentCard.innerHTML = `<div class="error">Could not load weather for your location.</div>`;
+          els.forecastCard.innerHTML = '';
+          els.status.textContent = '';
+        }
+      }, err=>{
+        els.currentCard.innerHTML = `<div class="error">Location error: ${err.message}</div>`;
+        els.forecastCard.innerHTML = '';
+        els.status.textContent = '';
+      }, {enableHighAccuracy:true, timeout:10000});
+    }
+
+    // --- Events
+    els.searchBtn.addEventListener('click', ()=>{
+      const name = els.q.value.trim();
+      if(name) showByCity(name);
+      else els.q.focus();
+    });
+    els.q.addEventListener('keydown', e=>{
+      if(e.key === 'Enter'){ e.preventDefault(); els.searchBtn.click(); }
+    });
+    els.geoBtn.addEventListener('click', showByGeo);
+
+    // Initial load: show a popular Indian city so it “just works”
+    showByCity('New Delhi, IN');
+  </script>
+</body>
+</html>
